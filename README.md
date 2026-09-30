@@ -16,7 +16,21 @@ The UI follows the system language (`LANGUAGE` / `LC_ALL` / `LC_MESSAGES` / `LAN
 omarchy plugin add https://github.com/iamanro/omarchy-omp-usage.git --enable
 ```
 
-Requirements: `omp` logged in to at least one Anthropic or OpenAI Codex subscription, and `/usr/bin/python3` (standard library only).
+Update with `omarchy plugin update iamanro.omp-usage`.
+
+## Remove
+
+```bash
+omarchy plugin remove iamanro.omp-usage
+rm -rf ~/.cache/omp-usage   # optional: the cost index
+```
+
+## Dependencies
+
+- [oh-my-pi](https://github.com/can1357/oh-my-pi): `omp` on `PATH` (or set `ompCommand`), logged in to at least one provider.
+- `/usr/bin/python3`, standard library only. No packages are installed.
+
+The plugin only reads `~/.omp/agent/sessions`, `~/.omp/agent/agent.db` (read-only) and the output of `omp usage --json`, and it writes only `~/.cache/omp-usage/`. It never changes OMP or Omarchy configuration. Network access happens only inside `omp usage`, which queries the providers' usage endpoints with your existing logins.
 
 ## What it shows
 
