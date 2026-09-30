@@ -28,7 +28,56 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 DAY_MS = 86_400_000
-PROVIDER_NAMES = {"anthropic": "Claude", "openai-codex": "Codex"}
+# OMP provider id -> (display name, icon in assets/ or ""). Order is display
+# order; unknown providers follow alphabetically with a title-cased id.
+PROVIDERS = {
+    "anthropic": ("Claude", "claude"),
+    "openai-codex": ("Codex", "codex"),
+    "google-gemini-cli": ("Gemini CLI", "gemini"),
+    "google-antigravity": ("Antigravity", "antigravity"),
+    "github-copilot": ("Copilot", "copilot"),
+    "cursor": ("Cursor", "cursor"),
+    "xai-oauth": ("Grok", "grok"),
+    "kimi-code": ("Kimi Code", "kimi"),
+    "zai": ("Z.ai", "zai"),
+    "zhipu-coding-plan": ("Zhipu", "zhipu"),
+    "minimax-code": ("MiniMax", "minimax"),
+    "minimax-code-cn": ("MiniMax CN", "minimax"),
+    "alibaba-token-plan": ("Alibaba", "bailian"),
+    "opencode-go": ("OpenCode Go", "opencode"),
+    "cline-pass": ("Cline", "cline"),
+    "devin": ("Devin", "devin"),
+    "firepass": ("Firepass", "fireworks"),
+    "fireworks": ("Fireworks", "fireworks"),
+    "ollama-cloud": ("Ollama Cloud", "ollama"),
+    "ollama": ("Ollama", "ollama"),
+    "commandcode": ("Command Code", "commandcode"),
+    "synthetic": ("Synthetic", ""),
+    "charm-hyper": ("Hyper", ""),
+    "muse-code": ("Muse Code", ""),
+    "umans": ("Umans", ""),
+    # Pay-as-you-go APIs: no quota, but their spend is in the session logs.
+    "openai": ("OpenAI", "openai"),
+    "google": ("Gemini API", "gemini"),
+    "google-vertex": ("Vertex AI", "vertexai"),
+    "openrouter": ("OpenRouter", "openrouter"),
+    "xai": ("xAI", "xai"),
+    "mistral": ("Mistral", "mistral"),
+    "deepseek": ("DeepSeek", "deepseek"),
+    "groq": ("Groq", "groq"),
+    "together": ("Together", "together"),
+    "cerebras": ("Cerebras", "cerebras"),
+    "moonshot": ("Moonshot", "moonshot"),
+    "huggingface": ("Hugging Face", "huggingface"),
+    "nvidia": ("NVIDIA", "nvidia"),
+    "azure": ("Azure OpenAI", "azure"),
+    "amazon-bedrock": ("Bedrock", "bedrock"),
+    "deepinfra": ("DeepInfra", "deepinfra"),
+    "baseten": ("Baseten", "baseten"),
+}
+# Providers whose spend shows up without a logged-in account (API keys in the
+# environment) are listed when they cost something within this window.
+COST_ONLY_WINDOW_DAYS = 30
 USAGE_TIMEOUT_SEC = 45
 MARKER = b'"assistant"'
 
@@ -268,9 +317,33 @@ def reset_credits(report: dict):
     return (int(count) if isinstance(count, int) else 0), (min(expiries) if expiries else None)
 
 
-def account_status(limits: list) -> str:
+def provider_name(pid: str) -> str:
+    known = PROVIDERS.get(pid)
+    return known[0] if known else pid.replace("-", " ").replace("_", " ").title()
+
+
+def mark_primary(limits: list) -> bool:
+    """Ensure the account has headline limits; returns True when every limit is tier-scoped.
+
+    Some providers (Gemini CLI, Antigravity) report only per-model buckets.
+    Their buckets then all count as primary, but the account is exhausted
+    only once every bucket is, since the others still serve requests.
+    """
+    if any(l["primary"] for l in limits):
+        return False
+    for limit in limits:
+        limit["primary"] = True
+    return bool(limits)
+
+
+def is_blocking(limit: dict) -> bool:
+    return limit["status"] == "exhausted" or (limit["percent"] or 0) >= 1
+
+
+def account_status(limits: list, tiered: bool = False) -> str:
     primary = [l for l in limits if l["primary"] and l["percent"] is not None]
-    if any(l["status"] == "exhausted" or l["percent"] >= 1 for l in primary):
+    blocked = [is_blocking(l) for l in primary]
+    if primary and (all(blocked) if tiered else any(blocked)):
         return "exhausted"
     if any(l["percent"] >= 0.9 for l in primary):
         return "limited"
@@ -279,12 +352,11 @@ def account_status(limits: list) -> str:
 
 def free_at(account: dict):
     """When an exhausted account is usable again: its last blocking window reset."""
-    blocking = [
-        l["resetsAt"]
-        for l in account["limits"]
-        if l["primary"] and l["resetsAt"] and (l["status"] == "exhausted" or (l["percent"] or 0) >= 1)
-    ]
-    return max(blocking) if account["status"] == "exhausted" and blocking else None
+    blocking = [l["resetsAt"] for l in account["limits"] if l["primary"] and l["resetsAt"] and is_blocking(l)]
+    if account["status"] != "exhausted" or not blocking:
+        return None
+    # A tier-only account is back as soon as its first bucket resets.
+    return min(blocking) if account.get("tiered") else max(blocking)
 
 
 def cost_sum(conn, since_ms, provider=None, credential=None) -> float:
@@ -305,14 +377,28 @@ def build_snapshot(conn, usage: dict | None, credentials: dict, now_ms: int, err
     month = now_ms - 30 * DAY_MS
     reports = (usage or {}).get("reports") or []
 
+    reports_per_provider = {}
+    for report in reports:
+        reports_per_provider[report.get("provider")] = reports_per_provider.get(report.get("provider"), 0) + 1
+
     accounts = []
     for report in reports:
         provider = str(report.get("provider") or "unknown")
         meta = report.get("metadata") or {}
-        email = str(meta.get("email") or meta.get("accountId") or "")
         org = str(meta.get("orgId") or "")
-        cid = credential_for(credentials, provider, email, org)
+        raw_email = str(meta.get("email") or "")
+        cid = credential_for(credentials, provider, raw_email, org)
+        if cid is None and reports_per_provider[provider] == 1:
+            # API-key logins carry no e-mail; one report and one credential
+            # for the provider can only belong together.
+            only = [c for (p, _e, _o), c in credentials.items() if p == provider]
+            cid = only[0] if len(only) == 1 else None
+        email = raw_email or str(
+            meta.get("accountName") or meta.get("username") or meta.get("login") or meta.get("accountId")
+            or (f"#{cid}" if cid is not None else provider_name(provider))
+        )
         limits = [normalize_limit(l) for l in report.get("limits") or [] if isinstance(l, dict)]
+        tiered = mark_primary(limits)
         primary = [l for l in limits if l["primary"] and l["percent"] is not None]
         binding = max(primary, key=lambda l: l["percent"]) if primary else None
         # "This window" means the account's longest primary window, which is
@@ -338,7 +424,8 @@ def build_snapshot(conn, usage: dict | None, credentials: dict, now_ms: int, err
             "email": email,
             "org": str(meta.get("orgName") or ""),
             "plan": str(meta.get("planType") or ""),
-            "status": account_status(limits),
+            "status": account_status(limits, tiered),
+            "tiered": tiered,
             "percent": binding["percent"] if binding else None,
             "bindingWindow": binding["window"] if binding else "",
             "limits": limits,
@@ -349,22 +436,47 @@ def build_snapshot(conn, usage: dict | None, credentials: dict, now_ms: int, err
             "cost": cost,
         })
 
-    for disabled in (usage or {}).get("disabledCredentials") or []:
-        if isinstance(disabled, dict):
+    # Logged-in accounts OMP has no usage report for (no quota API, or the
+    # fetch failed) and disabled credentials still list, without meters.
+    for status, entries in (("ok", "accountsWithoutUsage"), ("disabled", "disabledCredentials")):
+        for entry in (usage or {}).get(entries) or []:
+            if not isinstance(entry, dict):
+                continue
+            provider = str(entry.get("provider") or "unknown")
+            email = str(entry.get("email") or entry.get("identity") or entry.get("label") or "")
+            cid = entry.get("credentialId", entry.get("id"))
+            cid = cid if isinstance(cid, int) and not isinstance(cid, bool) else credential_for(
+                credentials, provider, email, str(entry.get("orgId") or ""))
+            if status == "ok" and cid is not None and any(a["credentialId"] == cid for a in accounts):
+                continue
             accounts.append({
-                "key": f"{disabled.get('provider')}:disabled:{disabled.get('id') or disabled.get('email')}",
-                "credentialId": disabled.get("id"),
-                "provider": str(disabled.get("provider") or "unknown"),
-                "email": str(disabled.get("email") or disabled.get("identity") or "disabled"),
-                "org": "", "plan": "", "status": "disabled", "percent": None, "bindingWindow": "",
+                "key": f"{provider}:{status}:{cid if cid is not None else email}",
+                "credentialId": cid,
+                "provider": provider,
+                "email": email or (f"#{cid}" if cid is not None else provider_name(provider)),
+                "org": "", "plan": "", "status": status, "tiered": False, "percent": None, "bindingWindow": "",
                 "limits": [], "resetCredits": 0, "resetCreditsExpireAt": None,
-                "fetchedAt": None, "windowStart": None, "cost": None,
+                "fetchedAt": None, "windowStart": None,
+                "cost": None if cid is None else {
+                    "today": cost_sum(conn, today, credential=cid), "window": None,
+                    "week": cost_sum(conn, week, credential=cid), "month": cost_sum(conn, month, credential=cid),
+                    "total": cost_sum(conn, 0, credential=cid),
+                },
             })
 
-    order = list(PROVIDER_NAMES)
+    # Spend on providers without any OMP account (API keys from the
+    # environment) still counts; they get the cost sections only.
+    spending = {
+        row[0]
+        for row in conn.execute(
+            "SELECT DISTINCT provider FROM messages WHERE ts >= ? AND cost > 0",
+            (now_ms - COST_ONLY_WINDOW_DAYS * DAY_MS,),
+        )
+    }
+    order = list(PROVIDERS)
     provider_ids = sorted(
-        {a["provider"] for a in accounts},
-        key=lambda pid: (order.index(pid) if pid in order else len(order), pid),
+        {a["provider"] for a in accounts} | spending,
+        key=lambda pid: (order.index(pid) if pid in order else len(order), provider_name(pid).lower()),
     )
 
     providers = []
@@ -372,13 +484,24 @@ def build_snapshot(conn, usage: dict | None, credentials: dict, now_ms: int, err
         members = [a for a in accounts if a["provider"] == pid and a["status"] != "disabled"]
         # Pool usage per window: the share of the combined quota already
         # spent, i.e. OMP's capacity figure (used accounts / accounts).
+        # Accounts that report no meters (no quota API) stay out of the
+        # denominator; an account lacking one window counts 0 in it.
+        metered = [a for a in members if any(l["primary"] and l["percent"] is not None for l in a["limits"])]
         windows = {}
-        for account in members:
+        durations = {}
+        for account in metered:
+            # Several per-model buckets can share one window; the fullest
+            # one is the account's figure for it.
+            fullest = {}
             for limit in account["limits"]:
                 if limit["primary"] and limit["percent"] is not None:
-                    windows.setdefault(limit["window"], []).append(min(1.0, limit["percent"]))
+                    fullest[limit["window"]] = max(fullest.get(limit["window"], 0.0), min(1.0, limit["percent"]))
+                    durations[limit["window"]] = durations.get(limit["window"]) or limit["durationMs"]
+            for wid, value in fullest.items():
+                windows.setdefault(wid, []).append(value)
         pool = [
-            {"id": wid, "percent": sum(values) / len(members), "accounts": len(values)}
+            {"id": wid, "durationMs": durations.get(wid), "percent": sum(values) / len(metered),
+             "accounts": len(values)}
             for wid, values in windows.items()
         ]
         pool.sort(key=lambda w: -w["percent"])
@@ -419,11 +542,13 @@ def build_snapshot(conn, usage: dict | None, credentials: dict, now_ms: int, err
         ]
         providers.append({
             "id": pid,
-            "name": PROVIDER_NAMES.get(pid, pid.replace("-", " ").title()),
+            "name": provider_name(pid),
+            "icon": PROVIDERS.get(pid, ("", ""))[1],
             "accounts": len(members),
             "available": len([a for a in members if a["status"] != "exhausted"]),
             "percent": pool[0]["percent"] if pool else None,
             "window": pool[0]["id"] if pool else "",
+            "windowDurationMs": pool[0]["durationMs"] if pool else None,
             "windows": pool,
             "nextResetAt": min(resets)[0] if resets else None,
             "nextResetAccount": min(resets)[1] if resets else "",
@@ -489,17 +614,21 @@ def demo_snapshot(now_ms: int) -> dict:
     rng = random.Random(7)
     hour = 3_600_000
 
-    def limit(provider, window, fraction, resets_in_ms, tier=None):
-        duration = {"5h": 5 * hour, "7d": 7 * DAY_MS}[window]
+    windows = {"5h": (5 * hour, "5 Hour"), "24h": (DAY_MS, "Daily"), "7d": (7 * DAY_MS, "7 Day"),
+               "30d": (30 * DAY_MS, "Monthly")}
+
+    def limit(provider, window, fraction, resets_in_ms, tier=None, amount=None):
+        duration, label = windows[window]
         scope = {"provider": provider, "windowId": window}
         scope.update({"tier": tier} if tier else {"shared": True})
         return {
             "id": f"{provider}:{window}" + (f":{tier}" if tier else ""),
-            "label": {"5h": "5 Hour", "7d": "7 Day"}[window] + (f" ({tier.title()})" if tier else ""),
+            "label": label + (f" ({tier.title()})" if tier else ""),
             "scope": scope,
             "window": {"id": window, "durationMs": duration,
                        "resetsAt": now_ms + resets_in_ms if resets_in_ms else None},
-            "amount": {"usedFraction": fraction, "unit": "percent"},
+            # Some providers report counts rather than a fraction.
+            "amount": amount or {"usedFraction": fraction, "unit": "percent"},
             "status": "exhausted" if fraction >= 1 else "ok",
         }
 
@@ -525,9 +654,21 @@ def demo_snapshot(now_ms: int) -> dict:
         (4, "openai-codex", "dave@example.com", "pro", [
             limit("openai-codex", "7d", 0.71, 2 * DAY_MS + 9 * hour),
         ], credit(1, 12)),
+        # Per-model buckets only, like Gemini CLI.
+        (5, "google-gemini-cli", "erin@example.com", "", [
+            limit("google-gemini-cli", "24h", 0.34, 9 * hour, tier="pro"),
+            limit("google-gemini-cli", "24h", 0.12, 9 * hour, tier="flash"),
+        ], credit(0, 0)),
+        # A request count rather than a percentage, like Copilot.
+        (6, "github-copilot", "frank@example.com", "pro", [
+            limit("github-copilot", "30d", 0.0, 17 * DAY_MS,
+                  amount={"used": 212, "limit": 300, "unit": "requests"}),
+        ], credit(0, 0)),
     ]
     models = {"anthropic": ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5"],
-              "openai-codex": ["gpt-5.5", "gpt-6-sol"]}
+              "openai-codex": ["gpt-5.5", "gpt-6-sol"],
+              "google-gemini-cli": ["gemini-3.1-pro", "gemini-3-flash"],
+              "github-copilot": ["claude-sonnet-5", "gpt-5.5"]}
 
     conn = sqlite3.connect(":memory:")
     conn.executescript(SCHEMA)
@@ -539,6 +680,10 @@ def demo_snapshot(now_ms: int) -> dict:
             credential = cid if ts > now_ms - 8 * DAY_MS else None
             model = rng.choice(models[provider])
             rows.append((0, f"{cid}-{n}", ts, provider, model, credential, round(rng.uniform(0.05, 1.9), 4)))
+    # Spend through an API key in the environment, with no OMP account.
+    for n in range(60):
+        ts = now_ms - int(rng.random() * 10 * DAY_MS)
+        rows.append((0, f"or-{n}", ts, "openrouter", "deepseek-v4", None, round(rng.uniform(0.01, 0.4), 4)))
     conn.executemany("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
 
     usage = {

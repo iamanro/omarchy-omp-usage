@@ -7,7 +7,7 @@
 var strings = {
   en: {
     now: "now", inTime: "in {0}", ago: "{0} ago", agoSeconds: "{0} s ago",
-    w5h: "5 h", w7d: "7 days", d30: "30 days", today: "Today", total: "Total",
+    nHours: "{0} h", nDays: "{0} days", month: "month", w7d: "7 days", d30: "30 days", today: "Today", total: "Total",
     stDisabled: "disabled", stExhausted: "exhausted", stLimited: "near limit", stOk: "OK",
     free: "free {0}/{1}", resetIn: "reset {0}", loading: "loading",
     todayApi: "Today {0} (API equivalent)", windowIdle: "window not running",
@@ -29,7 +29,7 @@ var strings = {
   },
   cs: {
     now: "teď", inTime: "za {0}", ago: "před {0}", agoSeconds: "před {0} s",
-    w5h: "5 h", w7d: "7 dní", d30: "30 dní", today: "Dnes", total: "Celkem",
+    nHours: "{0} h", nDays: "{0} dní", month: "měsíc", w7d: "7 dní", d30: "30 dní", today: "Dnes", total: "Celkem",
     stDisabled: "vypnutý", stExhausted: "vyčerpaný", stLimited: "u limitu", stOk: "OK",
     free: "volné {0}/{1}", resetIn: "reset {0}", loading: "načítám",
     todayApi: "Dnes {0} (API ekvivalent)", windowIdle: "okno neběží",
@@ -51,7 +51,7 @@ var strings = {
   },
   sk: {
     now: "teraz", inTime: "o {0}", ago: "pred {0}", agoSeconds: "pred {0} s",
-    w5h: "5 h", w7d: "7 dní", d30: "30 dní", today: "Dnes", total: "Celkom",
+    nHours: "{0} h", nDays: "{0} dní", month: "mesiac", w7d: "7 dní", d30: "30 dní", today: "Dnes", total: "Celkom",
     stDisabled: "vypnutý", stExhausted: "vyčerpaný", stLimited: "pri limite", stOk: "OK",
     free: "voľné {0}/{1}", resetIn: "reset {0}", loading: "načítavam",
     todayApi: "Dnes {0} (API ekvivalent)", windowIdle: "okno nebeží",
@@ -73,7 +73,7 @@ var strings = {
   },
   de: {
     now: "jetzt", inTime: "in {0}", ago: "vor {0}", agoSeconds: "vor {0} s",
-    w5h: "5 Std.", w7d: "7 Tage", d30: "30 Tage", today: "Heute", total: "Gesamt",
+    nHours: "{0} Std.", nDays: "{0} Tage", month: "Monat", w7d: "7 Tage", d30: "30 Tage", today: "Heute", total: "Gesamt",
     stDisabled: "deaktiviert", stExhausted: "erschöpft", stLimited: "am Limit", stOk: "OK",
     free: "frei {0}/{1}", resetIn: "Reset {0}", loading: "lädt",
     todayApi: "Heute {0} (API-Äquivalent)", windowIdle: "Fenster läuft nicht",
@@ -95,7 +95,7 @@ var strings = {
   },
   pl: {
     now: "teraz", inTime: "za {0}", ago: "{0} temu", agoSeconds: "{0} s temu",
-    w5h: "5 godz.", w7d: "7 dni", d30: "30 dni", today: "Dziś", total: "Łącznie",
+    nHours: "{0} godz.", nDays: "{0} dni", month: "miesiąc", w7d: "7 dni", d30: "30 dni", today: "Dziś", total: "Łącznie",
     stDisabled: "wyłączone", stExhausted: "wyczerpane", stLimited: "blisko limitu", stOk: "OK",
     free: "wolne {0}/{1}", resetIn: "reset {0}", loading: "ładowanie",
     todayApi: "Dziś {0} (ekwiwalent API)", windowIdle: "okno nieaktywne",
@@ -117,7 +117,7 @@ var strings = {
   },
   ru: {
     now: "сейчас", inTime: "через {0}", ago: "{0} назад", agoSeconds: "{0} с назад",
-    w5h: "5 ч", w7d: "7 дней", d30: "30 дней", today: "Сегодня", total: "Всего",
+    nHours: "{0} ч", nDays: "{0} дней", month: "месяц", w7d: "7 дней", d30: "30 дней", today: "Сегодня", total: "Всего",
     stDisabled: "отключён", stExhausted: "исчерпан", stLimited: "у лимита", stOk: "OK",
     free: "свободно {0}/{1}", resetIn: "сброс {0}", loading: "загрузка",
     todayApi: "Сегодня {0} (эквивалент API)", windowIdle: "окно не активно",
@@ -139,7 +139,7 @@ var strings = {
   },
   uk: {
     now: "зараз", inTime: "через {0}", ago: "{0} тому", agoSeconds: "{0} с тому",
-    w5h: "5 год", w7d: "7 днів", d30: "30 днів", today: "Сьогодні", total: "Усього",
+    nHours: "{0} год", nDays: "{0} днів", month: "місяць", w7d: "7 днів", d30: "30 днів", today: "Сьогодні", total: "Усього",
     stDisabled: "вимкнено", stExhausted: "вичерпано", stLimited: "біля ліміту", stOk: "OK",
     free: "вільно {0}/{1}", resetIn: "скидання {0}", loading: "завантаження",
     todayApi: "Сьогодні {0} (еквівалент API)", windowIdle: "вікно не активне",
@@ -161,7 +161,7 @@ var strings = {
   },
   fr: {
     now: "maintenant", inTime: "dans {0}", ago: "il y a {0}", agoSeconds: "il y a {0} s",
-    w5h: "5 h", w7d: "7 jours", d30: "30 jours", today: "Aujourd’hui", total: "Total",
+    nHours: "{0} h", nDays: "{0} jours", month: "mois", w7d: "7 jours", d30: "30 jours", today: "Aujourd’hui", total: "Total",
     stDisabled: "désactivé", stExhausted: "épuisé", stLimited: "proche de la limite", stOk: "OK",
     free: "libres {0}/{1}", resetIn: "réinit. {0}", loading: "chargement",
     todayApi: "Aujourd’hui {0} (équivalent API)", windowIdle: "fenêtre inactive",
@@ -183,7 +183,7 @@ var strings = {
   },
   es: {
     now: "ahora", inTime: "en {0}", ago: "hace {0}", agoSeconds: "hace {0} s",
-    w5h: "5 h", w7d: "7 días", d30: "30 días", today: "Hoy", total: "Total",
+    nHours: "{0} h", nDays: "{0} días", month: "mes", w7d: "7 días", d30: "30 días", today: "Hoy", total: "Total",
     stDisabled: "desactivada", stExhausted: "agotada", stLimited: "cerca del límite", stOk: "OK",
     free: "libres {0}/{1}", resetIn: "reinicio {0}", loading: "cargando",
     todayApi: "Hoy {0} (equivalente API)", windowIdle: "ventana inactiva",
@@ -205,7 +205,7 @@ var strings = {
   },
   it: {
     now: "ora", inTime: "tra {0}", ago: "{0} fa", agoSeconds: "{0} s fa",
-    w5h: "5 h", w7d: "7 giorni", d30: "30 giorni", today: "Oggi", total: "Totale",
+    nHours: "{0} h", nDays: "{0} giorni", month: "mese", w7d: "7 giorni", d30: "30 giorni", today: "Oggi", total: "Totale",
     stDisabled: "disattivato", stExhausted: "esaurito", stLimited: "vicino al limite", stOk: "OK",
     free: "liberi {0}/{1}", resetIn: "reset {0}", loading: "caricamento",
     todayApi: "Oggi {0} (equivalente API)", windowIdle: "finestra non attiva",
@@ -227,7 +227,7 @@ var strings = {
   },
   pt: {
     now: "agora", inTime: "em {0}", ago: "há {0}", agoSeconds: "há {0} s",
-    w5h: "5 h", w7d: "7 dias", d30: "30 dias", today: "Hoje", total: "Total",
+    nHours: "{0} h", nDays: "{0} dias", month: "mês", w7d: "7 dias", d30: "30 dias", today: "Hoje", total: "Total",
     stDisabled: "desativada", stExhausted: "esgotada", stLimited: "perto do limite", stOk: "OK",
     free: "livres {0}/{1}", resetIn: "reset {0}", loading: "carregando",
     todayApi: "Hoje {0} (equivalente API)", windowIdle: "janela inativa",
@@ -249,7 +249,7 @@ var strings = {
   },
   nl: {
     now: "nu", inTime: "over {0}", ago: "{0} geleden", agoSeconds: "{0} s geleden",
-    w5h: "5 u", w7d: "7 dagen", d30: "30 dagen", today: "Vandaag", total: "Totaal",
+    nHours: "{0} u", nDays: "{0} dagen", month: "maand", w7d: "7 dagen", d30: "30 dagen", today: "Vandaag", total: "Totaal",
     stDisabled: "uitgeschakeld", stExhausted: "uitgeput", stLimited: "bijna limiet", stOk: "OK",
     free: "vrij {0}/{1}", resetIn: "reset {0}", loading: "laden",
     todayApi: "Vandaag {0} (API-equivalent)", windowIdle: "venster niet actief",
@@ -271,7 +271,7 @@ var strings = {
   },
   ja: {
     now: "今", inTime: "{0}後", ago: "{0}前", agoSeconds: "{0}秒前",
-    w5h: "5時間", w7d: "7日間", d30: "30日間", today: "今日", total: "合計",
+    nHours: "{0}時間", nDays: "{0}日間", month: "月間", w7d: "7日間", d30: "30日間", today: "今日", total: "合計",
     stDisabled: "無効", stExhausted: "上限到達", stLimited: "上限間近", stOk: "OK",
     free: "空き {0}/{1}", resetIn: "リセット {0}", loading: "読み込み中",
     todayApi: "今日 {0}（API換算）", windowIdle: "ウィンドウ未開始",
@@ -293,7 +293,7 @@ var strings = {
   },
   zh: {
     now: "现在", inTime: "{0}后", ago: "{0}前", agoSeconds: "{0} 秒前",
-    w5h: "5 小时", w7d: "7 天", d30: "30 天", today: "今天", total: "总计",
+    nHours: "{0} 小时", nDays: "{0} 天", month: "月", w7d: "7 天", d30: "30 天", today: "今天", total: "总计",
     stDisabled: "已停用", stExhausted: "已用尽", stLimited: "接近上限", stOk: "正常",
     free: "可用 {0}/{1}", resetIn: "重置 {0}", loading: "加载中",
     todayApi: "今天 {0}（API 等价）", windowIdle: "窗口未开始",

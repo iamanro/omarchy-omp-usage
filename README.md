@@ -1,6 +1,8 @@
 # OMP Usage for Omarchy
 
-Omarchy bar widget showing Claude and Codex subscription usage across every account logged in to [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`), with reset times and the API-equivalent cost of what you used.
+Omarchy bar widget showing subscription usage for every provider and account logged in to [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`), with reset times and the API-equivalent cost of what you used.
+
+It covers every provider `omp usage` reports on: Claude, Codex, Gemini CLI, Antigravity, Copilot, Cursor, Grok, Kimi Code, Z.ai, Zhipu, MiniMax, Alibaba, OpenCode Go, Cline, Devin, Firepass, Ollama Cloud, Synthetic, and any provider OMP adds later. Providers that report a quota show up in the bar. Pay-as-you-go APIs you used through OMP (OpenRouter, OpenAI, Gemini API, DeepSeek, …) appear in the panel with their spend only.
 
 ![Panel with demo data](preview.png)
 
@@ -18,7 +20,7 @@ Requirements: `omp` logged in to at least one Anthropic or OpenAI Codex subscrip
 
 ## What it shows
 
-- **Bar:** provider icon + pool usage, i.e. the share of the combined quota of all that provider's accounts already used in the fullest window (same as the `capacity` line of `omp usage`). It turns the urgent colour at `alertPercent` or when every account is exhausted. Hover for a summary, right-click to refresh.
+- **Bar:** one icon + pool usage per provider with a quota, i.e. the share of the combined quota of all that provider's accounts already used in the fullest window (same as the `capacity` line of `omp usage`). Providers that only report per-model buckets (Gemini CLI, Antigravity) count their fullest bucket. Providers without a logo get a monogram. It turns the urgent colour at `alertPercent` or when every account is exhausted. Hover for a summary, right-click to refresh.
 - **Panel:** for each provider:
   - pool meters per window (5 h / 7 days)
   - next reset and when the next exhausted account frees up
@@ -68,4 +70,4 @@ bin/omp_usage.py snapshot --demo | jq   # demo snapshot
 
 ## License
 
-MIT. `assets/claude.svg`, `assets/codex*.svg` are taken from Omarchy's built-in Agents plugin (MIT).
+MIT. Provider logos come from [@lobehub/icons-static-svg](https://github.com/lobehub/lobe-icons) (MIT); `claude.svg` and `codex*.svg` come via Omarchy's built-in Agents plugin (MIT). Each logo ships as `<icon>.svg` for dark bars and `<icon>-light.svg` for light ones.

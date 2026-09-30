@@ -133,5 +133,55 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(claude["unattributed"]["week"], 3.0)
 
 
+class OtherProviderTests(unittest.TestCase):
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.executescript(omp_usage.SCHEMA)
+
+    def bucket(self, provider, tier, fraction, resets_at, status="ok"):
+        return {"id": f"{provider}:{tier}", "label": tier.title(), "scope": {"provider": provider, "tier": tier},
+                "window": {"id": "24h", "durationMs": DAY, "resetsAt": resets_at},
+                "amount": {"usedFraction": fraction}, "status": status}
+
+    def test_tier_only_buckets_headline_the_fullest_and_block_only_when_all_do(self):
+        gemini = {"provider": "google-gemini-cli", "metadata": {"email": "g@x"}, "limits": [
+            self.bucket("google-gemini-cli", "pro", 1.0, NOW + 3 * HOUR, "exhausted"),
+            self.bucket("google-gemini-cli", "flash", 0.2, NOW + 5 * HOUR),
+        ]}
+        snap = omp_usage.build_snapshot(self.conn, {"reports": [gemini]}, {}, NOW, [])
+        account = snap["accounts"][0]
+        # A full bucket warns but does not make the account unusable.
+        self.assertEqual((account["status"], account["percent"]), ("limited", 1.0))
+        provider = snap["providers"][0]
+        # One account: its fullest bucket, not the sum of both.
+        self.assertEqual([(w["id"], w["percent"]) for w in provider["windows"]], [("24h", 1.0)])
+        self.assertEqual((provider["name"], provider["icon"], provider["available"]), ("Gemini CLI", "gemini", 1))
+
+        gemini["limits"][1] = self.bucket("google-gemini-cli", "flash", 1.0, NOW + 5 * HOUR, "exhausted")
+        snap = omp_usage.build_snapshot(self.conn, {"reports": [gemini]}, {}, NOW, [])
+        self.assertEqual(snap["accounts"][0]["status"], "exhausted")
+        # Back once the first bucket resets.
+        self.assertEqual(snap["providers"][0]["nextFreeAt"], NOW + 3 * HOUR)
+
+    def test_api_key_account_maps_to_the_only_credential_and_counts_requests(self):
+        self.conn.execute("INSERT INTO messages VALUES (1, 'a', ?, 'github-copilot', 'm', 7, 2.0)", (NOW - HOUR,))
+        copilot = {"provider": "github-copilot", "metadata": {}, "limits": [{
+            "id": "copilot:premium", "scope": {"provider": "github-copilot", "shared": True},
+            "window": {"id": "monthly", "resetsAt": NOW + DAY},
+            "amount": {"used": 150, "limit": 300, "unit": "requests"}}]}
+        snap = omp_usage.build_snapshot(
+            self.conn, {"reports": [copilot]}, {("github-copilot", "", ""): 7}, NOW, [])
+        account = snap["accounts"][0]
+        self.assertEqual((account["credentialId"], account["email"], account["percent"]), (7, "#7", 0.5))
+        self.assertEqual(account["cost"]["today"], 2.0)
+
+    def test_spend_without_an_account_still_lists_the_provider(self):
+        self.conn.execute("INSERT INTO messages VALUES (1, 'a', ?, 'openrouter', 'm', NULL, 1.25)", (NOW - HOUR,))
+        snap = omp_usage.build_snapshot(self.conn, {"reports": []}, {}, NOW, [])
+        [provider] = snap["providers"]
+        self.assertEqual((provider["name"], provider["accounts"], provider["percent"]), ("OpenRouter", 0, None))
+        self.assertEqual(provider["cost"]["week"], 1.25)
+
+
 if __name__ == "__main__":
     unittest.main()

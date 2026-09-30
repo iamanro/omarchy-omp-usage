@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "iamanro.omp-usage",
   "name": "OMP Usage",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "iamanro",
   "license": "MIT",
-  "description": "Claude and Codex subscription usage across every OMP account, with reset times and API-equivalent cost.",
+  "description": "Subscription usage for every oh-my-pi (omp) provider and account, with reset times and API-equivalent cost.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "OMP Usage",
-    "description": "Pool usage per provider in the bar; the panel lists every account with its limits, resets, reset credits and API-equivalent cost from the OMP session logs.",
+    "description": "Pool usage per provider in the bar; the panel lists every account with its limits, resets, reset credits and API-equivalent cost from the OMP session logs, plus spend on pay-as-you-go providers.",
     "category": "AI",
     "aliases": [
       "omp",

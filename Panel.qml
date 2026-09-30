@@ -60,6 +60,9 @@ Panel {
 
   readonly property var providers: snapshot && Array.isArray(snapshot.providers) ? snapshot.providers : []
   readonly property var accounts: snapshot && Array.isArray(snapshot.accounts) ? snapshot.accounts : []
+  // Only providers with a quota meter earn a place in the bar; spend-only
+  // providers live in the panel.
+  readonly property var barProviders: providers.filter(function(p) { return p.percent !== null && p.percent !== undefined })
   readonly property var errors: {
     var list = snapshot && Array.isArray(snapshot.errors) ? snapshot.errors.slice() : []
     if (failure !== "") list.unshift(failure)
@@ -88,7 +91,7 @@ Panel {
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
 
   function providerAlarming(p) {
-    return !!p && (Number(p.percent) >= root.alertFraction || Number(p.available) === 0)
+    return !!p && Number(p.accounts) > 0 && (Number(p.percent) >= root.alertFraction || Number(p.available) === 0)
   }
 
   function accountsOf(providerId) {
@@ -138,10 +141,24 @@ Panel {
     return diff < 60000 ? root.t("agoSeconds", [Math.max(0, Math.round(diff / 1000))]) : root.t("ago", [root.duration(diff)])
   }
 
-  function windowName(id) {
-    if (id === "5h") return root.t("w5h")
-    if (id === "7d") return root.t("w7d")
-    return String(id || "")
+  // Providers name windows freely ("5h", "rolling-5h", "7d", "30d", "weekly",
+  // "monthly"); the duration decides when it is known, the id otherwise.
+  function windowName(id, durationMs) {
+    var hours = Number(durationMs) > 0 ? Math.round(Number(durationMs) / 3600000) : 0
+    var text = String(id || "").toLowerCase()
+    if (hours === 0) {
+      var h = text.match(/(\d+)\s*h/)
+      var d = text.match(/(\d+)\s*d/)
+      if (h) hours = Number(h[1])
+      else if (d) hours = Number(d[1]) * 24
+      else if (text.indexOf("week") >= 0) hours = 168
+      else if (text.indexOf("day") >= 0 || text.indexOf("daily") >= 0) hours = 24
+      else if (text.indexOf("month") >= 0) return root.t("month")
+      else return String(id || "")
+    }
+    if (hours <= 48) return root.t("nHours", [hours])
+    if (hours >= 28 * 24 && hours <= 31 * 24) return root.t("month")
+    return root.t("nDays", [Math.round(hours / 24)])
   }
 
   // hideEmails keeps the first letter of each part and the TLD, enough to
@@ -180,11 +197,17 @@ Panel {
     return root.t("stOk")
   }
 
-  function iconFor(providerId) {
-    if (providerId === "anthropic") return Qt.resolvedUrl("assets/claude.svg")
-    if (providerId === "openai-codex")
-      return Qt.resolvedUrl(luminance(root.ink) < 0.5 ? "assets/codex-light.svg" : "assets/codex.svg")
-    return ""
+  // Every icon ships as <icon>.svg for dark surfaces and <icon>-light.svg for
+  // light ones (identical for coloured marks).
+  function iconFor(p) {
+    var icon = p ? String(p.icon || "") : ""
+    if (icon === "") return ""
+    return Qt.resolvedUrl("assets/" + icon + (luminance(root.ink) < 0.5 ? "-light" : "") + ".svg")
+  }
+
+  function monogram(p) {
+    var words = String(p && p.name || "?").split(/[\s.-]+/).filter(function(w) { return w !== "" })
+    return words.length > 1 ? (words[0].charAt(0) + words[1].charAt(0)).toUpperCase() : String(words[0] || "?").slice(0, 2)
   }
 
   function luminance(c) {
@@ -193,7 +216,9 @@ Panel {
   }
 
   function providerLine(p) {
-    var text = p.name + " " + root.percentText(p.percent) + " (" + root.windowName(p.window) + ")"
+    if (p.percent === null || p.percent === undefined)
+      return p.name + " · " + root.t("todayLine", [root.money(p.cost ? p.cost.today : 0)])
+    var text = p.name + " " + root.percentText(p.percent) + " (" + root.windowName(p.window, p.windowDurationMs) + ")"
     text += " · " + root.t("free", [p.available, p.accounts])
     if (p.nextResetAt) text += " · " + root.t("resetIn", [root.untilText(p.nextResetAt)])
     return text
@@ -208,7 +233,7 @@ Panel {
   }
 
   function limitTooltip(l) {
-    var text = String(l.label || root.windowName(l.window))
+    var text = String(l.label || root.windowName(l.window, l.durationMs))
     if (l.resetsAt) text += " · " + root.t("resetIn", [root.untilText(l.resetsAt)]) + " (" + root.clockText(l.resetsAt) + ")"
     else text += " · " + root.t("windowIdle")
     return text
@@ -332,7 +357,7 @@ Panel {
     Grid {
       id: readout
       anchors.centerIn: parent
-      columns: root.bar && root.bar.vertical ? 1 : Math.max(1, root.providers.length * 2 + (root.showCostInBar ? 1 : 0))
+      columns: root.bar && root.bar.vertical ? 1 : Math.max(1, root.barProviders.length + (root.showCostInBar ? 1 : 0))
       columnSpacing: Style.space(5)
       rowSpacing: Style.space(3)
       flow: Grid.LeftToRight
@@ -340,7 +365,7 @@ Panel {
       horizontalItemAlignment: Grid.AlignHCenter
 
       Text {
-        visible: root.providers.length === 0
+        visible: root.barProviders.length === 0
         text: root.loaded ? "OMP —" : "OMP …"
         color: root.barInk
         font.family: root.fontFamily
@@ -349,7 +374,7 @@ Panel {
       }
 
       Repeater {
-        model: root.providers
+        model: root.barProviders
 
         delegate: Item {
           required property var modelData
@@ -364,15 +389,11 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(4)
 
-            Image {
+            ProviderMark {
               anchors.verticalCenter: parent.verticalCenter
-              width: Style.font.body
-              height: Style.font.body
-              sourceSize.width: Style.font.body * 2
-              sourceSize.height: Style.font.body * 2
-              fillMode: Image.PreserveAspectFit
-              source: root.iconFor(modelData.id)
-              visible: status === Image.Ready
+              provider: modelData
+              size: Style.font.body
+              color: root.barInk
             }
 
             Text {
@@ -570,16 +591,13 @@ Panel {
       width: parent.width
       implicitHeight: Math.max(sectionIcon.height, sectionTitle.implicitHeight)
 
-      Image {
+      ProviderMark {
         id: sectionIcon
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
-        width: Style.font.icon
-        height: Style.font.icon
-        sourceSize.width: Style.font.icon * 2
-        sourceSize.height: Style.font.icon * 2
-        fillMode: Image.PreserveAspectFit
-        source: section.provider ? root.iconFor(section.provider.id) : ""
+        provider: section.provider
+        size: Style.font.icon
+        color: root.ink
       }
 
       Text {
@@ -597,7 +615,7 @@ Panel {
       Text {
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        text: section.provider
+        text: section.provider && section.provider.accounts > 0
           ? root.t("free", [section.provider.available, section.provider.accounts])
           : ""
         color: section.provider && section.provider.available === 0 ? root.urgent : root.dim
@@ -622,7 +640,7 @@ Panel {
 
           Text {
             id: poolLabel
-            text: root.t("pool", [root.windowName(modelData.id)])
+            text: root.t("pool", [root.windowName(modelData.id, modelData.durationMs)])
             color: root.ink
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -685,6 +703,7 @@ Panel {
     }
 
     PanelSectionHeader {
+      visible: section.members.length > 0
       text: root.t("accounts")
       foreground: root.ink
       fontFamily: root.fontFamily
@@ -702,7 +721,9 @@ Panel {
 
     InfoRow {
       width: parent.width
-      visible: !!(section.provider && section.provider.unattributed && section.provider.unattributed.total > 0)
+      // Spend-only providers have no accounts, so everything would be "unattributed".
+      visible: !!(section.provider && section.provider.accounts > 0
+                  && section.provider.unattributed && section.provider.unattributed.total > 0)
       label: root.t("unattributed")
       value: section.provider && section.provider.unattributed
         ? root.t("unattributedValue", [root.money(section.provider.unattributed.week), root.money(section.provider.unattributed.total)])
@@ -826,6 +847,7 @@ Panel {
           required property var modelData
           width: accountColumn.width
           limit: modelData
+          named: !!accountRow.account.tiered
         }
       }
 
@@ -847,6 +869,7 @@ Panel {
   component LimitRow: Item {
     id: limitRow
     property var limit: null
+    property bool named: false
     readonly property bool alarm: !!limit && (limit.status === "exhausted" || Number(limit.percent) >= root.alertFraction)
 
     implicitHeight: Math.max(limitName.implicitHeight, limitReset.implicitHeight)
@@ -855,11 +878,14 @@ Panel {
       id: limitName
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
-      width: Style.space(44)
-      text: limitRow.limit ? root.windowName(limitRow.limit.window) : ""
+      // Per-model buckets share a window, so they are told apart by label.
+      width: limitRow.named ? Style.space(104) : Style.space(44)
+      text: !limitRow.limit ? ""
+        : (limitRow.named && limitRow.limit.label ? limitRow.limit.label : root.windowName(limitRow.limit.window, limitRow.limit.durationMs))
       color: root.dim
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
+      elide: Text.ElideRight
     }
 
     Meter {
@@ -1106,6 +1132,48 @@ Panel {
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       font.bold: true
+    }
+  }
+
+  // Provider logo, or a monogram badge for providers without one.
+  component ProviderMark: Item {
+    id: mark
+    property var provider: null
+    property real size: Style.font.body
+    property color color: root.ink
+    readonly property bool hasImage: markImage.status === Image.Ready
+
+    implicitWidth: size
+    implicitHeight: size
+    width: size
+    height: size
+
+    Image {
+      id: markImage
+      anchors.fill: parent
+      sourceSize.width: mark.size * 2
+      sourceSize.height: mark.size * 2
+      fillMode: Image.PreserveAspectFit
+      source: root.iconFor(mark.provider)
+      visible: mark.hasImage
+    }
+
+    Rectangle {
+      anchors.fill: parent
+      visible: !mark.hasImage
+      radius: Style.space(3)
+      color: "transparent"
+      border.width: 1
+      border.color: Util.alpha(mark.color, 0.7)
+
+      Text {
+        anchors.centerIn: parent
+        text: root.monogram(mark.provider)
+        color: mark.color
+        font.family: root.fontFamily
+        font.pixelSize: Math.max(7, Math.round(mark.size * 0.5))
+        font.bold: true
+      }
     }
   }
 
