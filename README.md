@@ -77,10 +77,14 @@ Translations live in `I18n.js`. To add a language, copy the `en` block. Missing 
 python3 -m unittest discover -s tests   # helper tests
 bin/omp_usage.py snapshot | jq          # raw snapshot
 bin/omp_usage.py snapshot --demo | jq   # demo snapshot
-./install.sh                            # copy a working tree into the shell and restart it
 ```
 
-`install.sh` installs a copy rather than a symlink, because the shell's plugin watcher doesn't follow symlinks. It restarts the shell because already-loaded QML stays cached.
+To try a working tree, copy it over the installed plugin and restart the shell. Use a copy, not a symlink: the shell's plugin watcher doesn't follow symlinks, and already-loaded QML stays cached until a restart.
+
+```bash
+dest=~/.config/omarchy/plugins/iamanro.omp-usage
+rsync -a --delete --exclude .git --exclude tests ./ "$dest/" && omarchy restart shell
+```
 
 ## License
 
