@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "id": "iamanro.omp-usage",
+  "name": "OMP Usage",
+  "version": "0.1.0",
+  "author": "iamanro",
+  "license": "MIT",
+  "description": "Claude and Codex subscription usage across every OMP account, with reset times and API-equivalent cost.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "OMP Usage",
+    "description": "Pool usage per provider in the bar; the panel lists every account with its limits, resets, reset credits and API-equivalent cost from the OMP session logs.",
+    "category": "AI",
+    "aliases": [
+      "omp",
+      "usage",
+      "claude",
+      "codex"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 120,
+      "ompCommand": "omp",
+      "alertPercent": 90,
+      "showCostInBar": false,
+      "hideEmails": false,
+      "demoMode": false,
+      "language": "auto"
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 30,
+        "max": 3600,
+        "step": 30,
+        "defaultValue": 120,
+        "description": "Seconds between snapshots. Opening the panel always refreshes."
+      },
+      {
+        "key": "ompCommand",
+        "type": "string",
+        "label": "omp command",
+        "defaultValue": "omp",
+        "description": "Name on PATH or absolute path of the omp executable."
+      },
+      {
+        "key": "alertPercent",
+        "type": "integer",
+        "label": "Alert at (%)",
+        "min": 50,
+        "max": 100,
+        "step": 5,
+        "defaultValue": 90,
+        "description": "Pool usage at which a provider turns the urgent colour."
+      },
+      {
+        "key": "showCostInBar",
+        "type": "boolean",
+        "label": "Show today's cost in the bar",
+        "defaultValue": false,
+        "description": "Append today's API-equivalent cost after the percentages."
+      },
+      {
+        "key": "hideEmails",
+        "type": "boolean",
+        "label": "Hide e-mails",
+        "defaultValue": false,
+        "description": "Mask account e-mails (a•••@e•••.com) and organisation names, e.g. for screen sharing."
+      },
+      {
+        "key": "demoMode",
+        "type": "boolean",
+        "label": "Demo data",
+        "defaultValue": false,
+        "description": "Show invented accounts and spend instead of your own, for screenshots."
+      },
+      {
+        "key": "language",
+        "type": "enum",
+        "label": "Language",
+        "options": [
+          "auto",
+          "en",
+          "cs",
+          "sk",
+          "de",
+          "pl",
+          "ru",
+          "uk",
+          "fr",
+          "es",
+          "it",
+          "pt",
+          "nl",
+          "ja",
+          "zh"
+        ],
+        "defaultValue": "auto",
+        "description": "auto follows LANGUAGE / LC_ALL / LC_MESSAGES / LANG of the shell; unsupported languages fall back to English."
+      }
+    ]
+  }
+}
