@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "id": "iamanro.omp-usage",
-  "name": "OMP Usage",
-  "version": "0.2.0",
+  "name": "OMP Usage & Cost",
+  "version": "0.2.1",
   "author": "iamanro",
   "license": "MIT",
   "description": "Subscription usage for every oh-my-pi (omp) provider and account, with reset times and API-equivalent cost.",
@@ -13,7 +13,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "OMP Usage",
+    "displayName": "OMP Usage & Cost",
     "description": "Pool usage per provider in the bar; the panel lists every account with its limits, resets, reset credits and API-equivalent cost from the OMP session logs, plus spend on pay-as-you-go providers.",
     "category": "AI",
     "aliases": [

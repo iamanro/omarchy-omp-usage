@@ -1,4 +1,4 @@
-# OMP Usage for Omarchy
+# OMP Usage & Cost for Omarchy
 
 Omarchy bar widget showing subscription usage for every provider and account logged in to [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`), with reset times and the API-equivalent cost of what you used.
 

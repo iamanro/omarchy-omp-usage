@@ -1,4 +1,4 @@
-// OMP Usage: Claude and Codex subscription usage across every OMP account.
+// OMP Usage & Cost: subscription usage and API-equivalent cost across every OMP provider and account.
 //
 // The bar shows the pool usage of each provider (share of the combined quota
 // of all its accounts already spent in the fullest window). The panel lists
@@ -225,7 +225,7 @@ Panel {
   }
 
   function barTooltip() {
-    if (!root.loaded) return "OMP Usage · " + root.t("loading")
+    if (!root.loaded) return "OMP Usage & Cost · " + root.t("loading")
     var lines = root.providers.map(root.providerLine)
     lines.push(root.t("todayApi", [root.money(root.todayCost)]))
     if (root.errors.length > 0) lines.push("⚠ " + root.errors[0])
@@ -465,7 +465,7 @@ Panel {
 
           PanelHero {
             width: parent.width
-            title: "OMP Usage"
+            title: "OMP Usage & Cost"
             meta: runner.running && !root.loaded
               ? root.t("indexing")
               : (root.snapshot
