@@ -17,9 +17,11 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import random
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -123,10 +125,10 @@ def parse_line(line: bytes):
     usage = message.get("usage")
     cost = usage.get("cost") if isinstance(usage, dict) else None
     total = cost.get("total") if isinstance(cost, dict) else None
-    if not isinstance(total, (int, float)):
+    if not is_number(total) or total < 0:
         return None
     ts = message.get("timestamp")
-    if not isinstance(ts, (int, float)):
+    if not is_number(ts):
         ts = _iso_ms(entry.get("timestamp"))
         if ts is None:
             return None
@@ -143,15 +145,36 @@ def parse_line(line: bytes):
     )
 
 
-def open_index(path: Path) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def is_number(value) -> bool:
+    """A finite real number; JSON booleans and NaN/Infinity are not."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _connect_index(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=30, isolation_level=None)
-    conn.execute("PRAGMA journal_mode=WAL")
-    if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
-        conn.executescript("DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS messages;")
-        conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-    conn.executescript(SCHEMA)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+            conn.executescript("DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS messages;")
+            conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        conn.executescript(SCHEMA)
+    except BaseException:
+        conn.close()
+        raise
     return conn
+
+
+def open_index(path: Path) -> sqlite3.Connection:
+    """Open the cost index; a corrupt file is only a cache, so it is rebuilt."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        return _connect_index(path)
+    except sqlite3.DatabaseError as exc:
+        if isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc):
+            raise
+        for suffix in ("", "-wal", "-shm"):
+            Path(str(path) + suffix).unlink(missing_ok=True)
+        return _connect_index(path)
 
 
 def session_files(root: Path):
@@ -165,9 +188,11 @@ def index_sessions(conn: sqlite3.Connection, root: Path) -> None:
     """Bring the index up to date with every session log under `root`.
 
     Only complete lines are consumed: a line still being written keeps the
-    stored offset in front of it. A log that shrank was rewritten, so its rows
-    are dropped and it is read again from the start. Logs that disappear keep
-    their rows, since the money was spent either way.
+    stored offset in front of it. Appending always grows a log, so a log that
+    changed without growing was rewritten: its rows are dropped and it is read
+    again from the start. Logs that disappear keep their rows, since the money
+    was spent either way. A log that cannot be read is left untouched and
+    retried next time.
     """
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -180,17 +205,9 @@ def index_sessions(conn: sqlite3.Connection, root: Path) -> None:
             previous = known.get(path)
             if previous and previous[2] == st.st_size and previous[3] == st.st_mtime_ns:
                 continue
-            if previous:
-                file_id, offset = previous[0], previous[1]
-            else:
-                file_id = conn.execute(
-                    "INSERT INTO files (path, offset, size, mtime_ns) VALUES (?, 0, 0, 0)", (path,)
-                ).lastrowid
-                offset = 0
-            if st.st_size < offset:
-                conn.execute("DELETE FROM messages WHERE file_id = ?", (file_id,))
-                offset = 0
-            rows = []
+            rewritten = bool(previous) and st.st_size <= previous[2]
+            offset = previous[1] if previous and not rewritten else 0
+            parsed_rows = []
             try:
                 with open(path, "rb") as handle:
                     handle.seek(offset)
@@ -200,9 +217,18 @@ def index_sessions(conn: sqlite3.Connection, root: Path) -> None:
                         offset += len(line)
                         parsed = parse_line(line)
                         if parsed:
-                            rows.append((file_id, *parsed))
+                            parsed_rows.append(parsed)
             except OSError:
                 continue
+            if previous:
+                file_id = previous[0]
+            else:
+                file_id = conn.execute(
+                    "INSERT INTO files (path, offset, size, mtime_ns) VALUES (?, 0, 0, 0)", (path,)
+                ).lastrowid
+            if rewritten:
+                conn.execute("DELETE FROM messages WHERE file_id = ?", (file_id,))
+            rows = [(file_id, *parsed) for parsed in parsed_rows]
             conn.executemany(
                 "INSERT OR REPLACE INTO messages (file_id, entry_id, ts, provider, model, credential_id, cost)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -236,18 +262,37 @@ def resolve_omp(command: str) -> str | None:
     return shutil.which(command or "omp")
 
 
-def fetch_usage(omp: str) -> dict:
-    result = subprocess.run(
+def fetch_usage(omp: str, timeout: float = USAGE_TIMEOUT_SEC) -> dict:
+    """`omp usage --json`, parsed. Raises on failure.
+
+    omp runs in its own process group so a timeout kills everything it
+    spawned; killing only omp would leave children holding the output pipe
+    open and the read would block past the deadline.
+    """
+    proc = subprocess.Popen(
         [omp, "usage", "--json"],
-        capture_output=True,
-        text=True,
-        timeout=USAGE_TIMEOUT_SEC,
         stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
     )
-    if result.returncode != 0:
-        tail = (result.stderr or result.stdout).strip().splitlines()[-1:] or ["no output"]
-        raise RuntimeError(f"omp usage exited {result.returncode}: {tail[0]}")
-    return json.loads(result.stdout)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.communicate()
+        raise
+    if proc.returncode != 0:
+        tail = (stderr or stdout).strip().splitlines()[-1:] or ["no output"]
+        raise RuntimeError(f"omp usage exited {proc.returncode}: {tail[0]}")
+    payload = json.loads(stdout)
+    if not isinstance(payload, dict):
+        raise ValueError(f"omp usage returned {type(payload).__name__}, expected an object")
+    return payload
 
 
 def load_credentials(agent_db: Path) -> dict:
@@ -281,40 +326,51 @@ def local_midnight_ms(now_ms: int) -> int:
     return int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
 
 
+def as_dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def as_list(value) -> list:
+    return value if isinstance(value, list) else []
+
+
 def is_primary(limit: dict) -> bool:
     """Account-wide limits; model tiers (e.g. Fable) only gate their own models."""
-    scope = limit.get("scope") or {}
+    scope = as_dict(limit.get("scope"))
     return scope.get("shared") is True or not scope.get("tier")
 
 
 def normalize_limit(limit: dict) -> dict:
-    amount = limit.get("amount") or {}
-    window = limit.get("window") or {}
+    amount = as_dict(limit.get("amount"))
+    window = as_dict(limit.get("window"))
     fraction = amount.get("usedFraction")
-    if not isinstance(fraction, (int, float)):
+    if not is_number(fraction):
         used, cap = amount.get("used"), amount.get("limit")
-        fraction = used / cap if isinstance(used, (int, float)) and isinstance(cap, (int, float)) and cap > 0 else None
+        fraction = used / cap if is_number(used) and is_number(cap) and cap > 0 else None
+    duration = window.get("durationMs")
+    resets_at = window.get("resetsAt")
     return {
         "id": str(limit.get("id") or ""),
         "label": str(limit.get("label") or window.get("label") or ""),
-        "window": str(window.get("id") or (limit.get("scope") or {}).get("windowId") or ""),
-        "durationMs": window.get("durationMs") if isinstance(window.get("durationMs"), (int, float)) else None,
-        "percent": float(fraction) if fraction is not None else None,
-        "resetsAt": window.get("resetsAt") if isinstance(window.get("resetsAt"), (int, float)) else None,
+        "window": str(window.get("id") or as_dict(limit.get("scope")).get("windowId") or ""),
+        "durationMs": duration if is_number(duration) and duration > 0 else None,
+        # Below zero is noise; above one is a real overage and is kept.
+        "percent": max(0.0, float(fraction)) if fraction is not None else None,
+        "resetsAt": resets_at if is_number(resets_at) else None,
         "status": str(limit.get("status") or "ok"),
         "primary": is_primary(limit),
     }
 
 
 def reset_credits(report: dict):
-    credits = report.get("resetCredits") or {}
+    credits = as_dict(report.get("resetCredits"))
     count = credits.get("availableCount")
     expiries = [
         ms
-        for ms in (_iso_ms(c.get("expiresAt")) for c in credits.get("credits") or [] if isinstance(c, dict))
+        for ms in (_iso_ms(c.get("expiresAt")) for c in as_list(credits.get("credits")) if isinstance(c, dict))
         if ms is not None
     ]
-    return (int(count) if isinstance(count, int) else 0), (min(expiries) if expiries else None)
+    return (int(count) if is_number(count) and count > 0 else 0), (min(expiries) if expiries else None)
 
 
 def provider_name(pid: str) -> str:
@@ -375,16 +431,21 @@ def build_snapshot(conn, usage: dict | None, credentials: dict, now_ms: int, err
     today = local_midnight_ms(now_ms)
     week = now_ms - 7 * DAY_MS
     month = now_ms - 30 * DAY_MS
-    reports = (usage or {}).get("reports") or []
+    usage = as_dict(usage)
+    # One malformed report must not take the others down with it.
+    reports = [r for r in as_list(usage.get("reports")) if isinstance(r, dict)]
+
+    def provider_of(report) -> str:
+        return str(report.get("provider") or "unknown")
 
     reports_per_provider = {}
     for report in reports:
-        reports_per_provider[report.get("provider")] = reports_per_provider.get(report.get("provider"), 0) + 1
+        reports_per_provider[provider_of(report)] = reports_per_provider.get(provider_of(report), 0) + 1
 
     accounts = []
     for report in reports:
-        provider = str(report.get("provider") or "unknown")
-        meta = report.get("metadata") or {}
+        provider = provider_of(report)
+        meta = as_dict(report.get("metadata"))
         org = str(meta.get("orgId") or "")
         raw_email = str(meta.get("email") or "")
         cid = credential_for(credentials, provider, raw_email, org)
@@ -397,7 +458,7 @@ def build_snapshot(conn, usage: dict | None, credentials: dict, now_ms: int, err
             meta.get("accountName") or meta.get("username") or meta.get("login") or meta.get("accountId")
             or (f"#{cid}" if cid is not None else provider_name(provider))
         )
-        limits = [normalize_limit(l) for l in report.get("limits") or [] if isinstance(l, dict)]
+        limits = [normalize_limit(l) for l in as_list(report.get("limits")) if isinstance(l, dict)]
         tiered = mark_primary(limits)
         primary = [l for l in limits if l["primary"] and l["percent"] is not None]
         binding = max(primary, key=lambda l: l["percent"]) if primary else None
@@ -431,7 +492,7 @@ def build_snapshot(conn, usage: dict | None, credentials: dict, now_ms: int, err
             "limits": limits,
             "resetCredits": credits,
             "resetCreditsExpireAt": credits_expire,
-            "fetchedAt": report.get("fetchedAt"),
+            "fetchedAt": report.get("fetchedAt") if is_number(report.get("fetchedAt")) else None,
             "windowStart": window_start,
             "cost": cost,
         })
@@ -439,7 +500,7 @@ def build_snapshot(conn, usage: dict | None, credentials: dict, now_ms: int, err
     # Logged-in accounts OMP has no usage report for (no quota API, or the
     # fetch failed) and disabled credentials still list, without meters.
     for status, entries in (("ok", "accountsWithoutUsage"), ("disabled", "disabledCredentials")):
-        for entry in (usage or {}).get(entries) or []:
+        for entry in as_list(usage.get(entries)):
             if not isinstance(entry, dict):
                 continue
             provider = str(entry.get("provider") or "unknown")
@@ -567,7 +628,7 @@ def build_snapshot(conn, usage: dict | None, credentials: dict, now_ms: int, err
 
     return {
         "generatedAt": now_ms,
-        "usageFetchedAt": (usage or {}).get("generatedAt"),
+        "usageFetchedAt": usage.get("generatedAt") if is_number(usage.get("generatedAt")) else None,
         "trackedSince": conn.execute("SELECT MIN(ts) FROM messages WHERE credential_id IS NOT NULL").fetchone()[0],
         "errors": errors,
         "providers": providers,
@@ -578,19 +639,26 @@ def build_snapshot(conn, usage: dict | None, credentials: dict, now_ms: int, err
 def snapshot(args) -> dict:
     errors = []
     now_ms = int(time.time() * 1000)
-    conn = open_index(Path(args.cache))
     try:
+        conn = open_index(Path(args.cache))
+    except (OSError, sqlite3.Error) as exc:
+        # Without a cache, still show the limits; cost needs the index.
+        errors.append(f"Cost index unavailable ({exc}); costs are not shown.")
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(SCHEMA)
+    else:
         try:
             index_sessions(conn, Path(args.sessions))
         except (OSError, sqlite3.Error) as exc:
             errors.append(f"Session index: {exc}")
+    try:
         usage = None
         omp = resolve_omp(args.omp)
         if omp is None:
             errors.append(f"'{args.omp}' not found on PATH; set ompCommand in the widget settings.")
         else:
             try:
-                usage = fetch_usage(omp)
+                usage = fetch_usage(omp, args.usage_timeout)
             except subprocess.TimeoutExpired:
                 errors.append("omp usage timed out.")
             except (OSError, RuntimeError, ValueError) as exc:
@@ -709,14 +777,16 @@ def main(argv=None) -> int:
     snap.add_argument("--agent-db", default=str(home / ".omp/agent/agent.db"))
     snap.add_argument("--cache", default=str(cache_home / "omp-usage/index.db"))
     snap.add_argument("--demo", action="store_true", help="invented accounts and spend; reads nothing local")
+    snap.add_argument("--usage-timeout", type=float, default=USAGE_TIMEOUT_SEC, help="seconds to wait for omp usage")
     args = parser.parse_args(argv)
+    # The panel parses this with JSON.parse: one object, no NaN/Infinity, never a traceback.
     try:
         payload = demo_snapshot(int(time.time() * 1000)) if args.demo else snapshot(args)
-    except Exception as exc:  # the panel needs JSON, never a traceback
-        payload = {"generatedAt": int(time.time() * 1000), "errors": [f"{type(exc).__name__}: {exc}"],
-                   "providers": [], "accounts": []}
-    json.dump(payload, sys.stdout, separators=(",", ":"))
-    sys.stdout.write("\n")
+        text = json.dumps(payload, separators=(",", ":"), allow_nan=False)
+    except Exception as exc:
+        text = json.dumps({"generatedAt": int(time.time() * 1000), "errors": [f"{type(exc).__name__}: {exc}"],
+                           "providers": [], "accounts": []}, separators=(",", ":"))
+    sys.stdout.write(text + "\n")
     return 0
 
 

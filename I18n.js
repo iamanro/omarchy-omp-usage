@@ -336,6 +336,9 @@ function tr(lang, key, args) {
   var table = strings[lang] || strings.en
   var text = table[key] !== undefined ? table[key] : strings.en[key]
   if (text === undefined) return key
-  if (args) for (var i = 0; i < args.length; i++) text = text.split("{" + i + "}").join(String(args[i]))
-  return text
+  if (!args) return text
+  // One pass, so an argument that itself contains "{1}" is not substituted again.
+  return text.replace(/\{(\d+)\}/g, function(match, index) {
+    return Number(index) < args.length ? String(args[Number(index)]) : match
+  })
 }

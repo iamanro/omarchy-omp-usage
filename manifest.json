@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "iamanro.omp-usage",
   "name": "OMP Usage & Cost",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "author": "iamanro",
   "license": "MIT",
   "description": "Subscription usage for every oh-my-pi (omp) provider and account, with reset times and API-equivalent cost.",
