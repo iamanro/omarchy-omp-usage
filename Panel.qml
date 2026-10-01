@@ -257,15 +257,36 @@ Panel {
   // ------------------------------------------------------------ snapshot
 
   property string abortReason: ""
+  // A refresh requested mid-run runs once the current one exits instead of
+  // being dropped. If the command changed (demoMode, ompCommand), the running
+  // snapshot is killed and its output ignored, so data from the old mode
+  // never replaces the new one.
+  property bool refreshQueued: false
+  property bool superseded: false
+  property string runningKey: ""
+  readonly property string commandKey: root.ompCommand + "|" + root.demoMode
 
   function refresh() {
-    if (runner.running) return
+    if (runner.running) {
+      root.refreshQueued = true
+      if (root.runningKey !== root.commandKey && !root.superseded) {
+        root.superseded = true
+        runner.signal(9)
+      }
+      return
+    }
+    root.refreshQueued = false
     root.abortReason = ""
     var command = ["/usr/bin/python3", "-I", root.helper, "snapshot", "--omp", root.ompCommand]
     if (root.demoMode) command.push("--demo")
+    root.runningKey = root.commandKey
     runner.command = command
     runner.running = true
     deadline.restart()
+  }
+
+  function drainQueue() {
+    if (root.refreshQueued && !runner.running) root.refresh()
   }
 
   function abort(reason) {
@@ -277,6 +298,11 @@ Panel {
   function apply(text) {
     deadline.stop()
     root.nowMs = Date.now()
+    Qt.callLater(root.drainQueue)
+    if (root.superseded) {
+      root.superseded = false
+      return
+    }
     if (root.abortReason !== "") {
       root.failure = root.abortReason
       root.abortReason = ""
@@ -297,7 +323,10 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  onSettingsChanged: root.refresh()
+  // Deferred: this handler runs before bindings that read `settings`
+  // (demoMode, ompCommand) re-evaluate, so an immediate refresh would start
+  // with the previous values.
+  onSettingsChanged: Qt.callLater(root.refresh)
   onOpenedChanged: if (opened) {
     root.nowMs = Date.now()
     if (flick) flick.contentY = 0
@@ -307,6 +336,7 @@ Panel {
 
   Process {
     id: runner
+    onExited: Qt.callLater(root.drainQueue)
     stdout: StdioCollector {
       id: output
       waitForEnd: true
@@ -365,6 +395,7 @@ Panel {
       horizontalItemAlignment: Grid.AlignHCenter
 
       Text {
+        textFormat: Text.PlainText
         visible: root.barProviders.length === 0
         text: root.loaded ? "OMP —" : "OMP …"
         color: root.barInk
@@ -397,6 +428,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               anchors.verticalCenter: parent.verticalCenter
               text: root.percentText(modelData.percent)
               color: alarm ? root.urgent : root.barInk
@@ -409,6 +441,7 @@ Panel {
       }
 
       Text {
+        textFormat: Text.PlainText
         visible: root.showCostInBar && root.loaded
         leftPadding: Style.space(4)
         text: root.money(root.todayCost)
@@ -477,6 +510,7 @@ Panel {
             fontFamily: root.fontFamily
 
             iconComponent: Text {
+              textFormat: Text.PlainText
               text: "$"
               color: root.alarming ? root.urgent : root.ink
               font.family: root.fontFamily
@@ -487,6 +521,7 @@ Panel {
             trailingControl: Column {
               visible: root.loaded
               Text {
+                textFormat: Text.PlainText
                 anchors.right: parent.right
                 text: root.money(root.todayCost)
                 color: root.ink
@@ -495,6 +530,7 @@ Panel {
                 font.bold: true
               }
               Text {
+                textFormat: Text.PlainText
                 anchors.right: parent.right
                 text: root.t("todayPrice")
                 color: root.dim
@@ -533,6 +569,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.loaded && root.providers.length === 0
             width: parent.width
             topPadding: Style.space(16)
@@ -555,6 +592,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: !!root.snapshot && !!root.snapshot.trackedSince
             width: parent.width
             text: root.t("footnote", [root.snapshot && root.snapshot.trackedSince ? root.clockText(root.snapshot.trackedSince) : ""])
@@ -565,6 +603,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: root.t("hint")
@@ -601,6 +640,7 @@ Panel {
       }
 
       Text {
+        textFormat: Text.PlainText
         id: sectionTitle
         anchors.left: sectionIcon.right
         anchors.leftMargin: Style.space(8)
@@ -613,6 +653,7 @@ Panel {
       }
 
       Text {
+        textFormat: Text.PlainText
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
         text: section.provider && section.provider.accounts > 0
@@ -639,6 +680,7 @@ Panel {
           implicitHeight: poolLabel.implicitHeight
 
           Text {
+            textFormat: Text.PlainText
             id: poolLabel
             text: root.t("pool", [root.windowName(modelData.id, modelData.durationMs)])
             color: root.ink
@@ -647,6 +689,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             anchors.right: parent.right
             text: root.percentText(modelData.percent)
             color: alarm ? root.urgent : root.ink
@@ -809,6 +852,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           id: accountCost
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
@@ -852,6 +896,7 @@ Panel {
       }
 
       Text {
+        textFormat: Text.PlainText
         visible: accountRow.tierLimits.length > 0
         width: parent.width
         text: accountRow.tierLimits.map(function(l) {
@@ -875,6 +920,7 @@ Panel {
     implicitHeight: Math.max(limitName.implicitHeight, limitReset.implicitHeight)
 
     Text {
+      textFormat: Text.PlainText
       id: limitName
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
@@ -898,6 +944,7 @@ Panel {
     }
 
     Text {
+      textFormat: Text.PlainText
       id: limitPercent
       anchors.right: limitReset.left
       anchors.rightMargin: Style.space(8)
@@ -912,6 +959,7 @@ Panel {
     }
 
     Text {
+      textFormat: Text.PlainText
       id: limitReset
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
@@ -947,6 +995,7 @@ Panel {
     implicitHeight: Math.max(infoLabel.implicitHeight, infoValue.implicitHeight)
 
     Text {
+      textFormat: Text.PlainText
       id: infoLabel
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
@@ -1000,6 +1049,7 @@ Panel {
       spacing: Style.space(1)
 
       Text {
+        textFormat: Text.PlainText
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.money(cell.value)
         color: root.ink
@@ -1009,6 +1059,7 @@ Panel {
       }
 
       Text {
+        textFormat: Text.PlainText
         anchors.horizontalCenter: parent.horizontalCenter
         text: cell.label
         color: root.dim
@@ -1047,6 +1098,7 @@ Panel {
           height: chart.height
 
           Text {
+            textFormat: Text.PlainText
             id: dayLabel
             anchors.bottom: parent.bottom
             anchors.horizontalCenter: parent.horizontalCenter
@@ -1109,6 +1161,7 @@ Panel {
     }
 
     Text {
+      textFormat: Text.PlainText
       id: shareLabel
       anchors.left: parent.left
       anchors.leftMargin: Style.space(8)
@@ -1123,6 +1176,7 @@ Panel {
     }
 
     Text {
+      textFormat: Text.PlainText
       id: shareValue
       anchors.right: parent.right
       anchors.rightMargin: Style.space(8)
@@ -1167,6 +1221,7 @@ Panel {
       border.color: Util.alpha(mark.color, 0.7)
 
       Text {
+        textFormat: Text.PlainText
         anchors.centerIn: parent
         text: root.monogram(mark.provider)
         color: mark.color
